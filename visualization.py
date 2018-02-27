@@ -13,12 +13,12 @@ from keras.applications import vgg19
 pp = pprint.PrettyPrinter()
 
 flags = tf.app.flags
-flags.DEFINE_integer("iterations", 200, "number of iterations [200]")
+flags.DEFINE_integer("iterations", 50, "number of iterations [10]")
 flags.DEFINE_integer("iteration_counter", 10, "display frequency [10]")
-flags.DEFINE_float("learning_rate", 1., "initial Learning rate for adam [1.]")
+flags.DEFINE_float("learning_rate", 1., "initial Learning rate for adam [10.]")
 flags.DEFINE_float("decay_rate", 1., "learning rate decay per thousand updates - set to 1. for constant learning rate [1.]")
 flags.DEFINE_float("beta1", 0.99, "Momentum term of adam [0.99]")
-flags.DEFINE_float("alpha", .05, "content weight [.05]")
+flags.DEFINE_float("alpha", 1., "content weight")
 flags.DEFINE_integer("width", 256, "width of the picture [256]")
 flags.DEFINE_integer("height", 256, "height of the picture [256]")
 flags.DEFINE_integer("style_width", 256, "width of the style picture [256]")
@@ -58,12 +58,12 @@ class vgg_net():
     def features(self,x):
         y = 255*x
         red, green, blue = tf.split(axis=3, num_or_size_splits=3, value=y)
-        y = tf.concat(axis=3, values=[blue - 123.68,green - 116.779,red - 103.939])
+        y = tf.concat(axis=3, values=[blue - 103.939,green - 116.779,red - 123.68])
         outputs = []
         for layer in self.vgg.layers:
             if 'conv' in layer.name:
                 feature,y = self.conv(y,self.layer_dict[layer.name+'_kernel'],self.layer_dict[layer.name+'_bias'])
-                outputs.append(feature)
+                outputs.append(feature/255)
             if 'pool' in layer.name:
                 y = tf.nn.max_pool(y, ksize=[1,2, 2,1], strides=[1,2,2,1], padding='SAME')
         return outputs
@@ -127,8 +127,9 @@ def main(_):
 #    once this is done, we can introduce the image proper and optimize it
     image_shape = [1,]+content_shape
     im_var = tf.Variable(tf.random_normal(image_shape), name='image', trainable=True)
-    image = tf.nn.sigmoid(im_var)*1.01-0.005*tf.ones_like(im_var)
-
+#    If I use a simple sigmoid, the image values have to be quite high to reach 0 and 1, or close to them. So instead I stretch the sigmoid a bit
+    image = tf.clip_by_value(tf.nn.sigmoid(im_var)*1.01-0.005*tf.ones_like(im_var), 0.,1.)
+    
     image_features_content = vgg.features(image)
     image_features_style = vgg.features(image)
     grams_image = Gram(image_features_style)
@@ -140,7 +141,7 @@ def main(_):
         GS_const.append(tf.constant(gram))
 
     # we follow the original Gatys et al. paper which used specific layers:        
-    content_loss = content_loss_func(CF_const[9:10],image_features_content[9:10])
+    content_loss = content_loss_func(CF_const[8:9]+CF_const[14:15],image_features_content[8:9]+image_features_content[14:15])
     style_loss = style_loss_func([GS_const[0],GS_const[2],GS_const[4],GS_const[8],GS_const[12]],  [grams_image[0],grams_image[2],grams_image[4],grams_image[8],grams_image[12]])
     
     alpha = FLAGS.alpha
